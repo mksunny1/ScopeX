@@ -56,8 +56,10 @@ void runScenario1_SmallHighFrequency() {
 
     // 1A. Vanilla C++
     size_t memBefore1 = getMeasuredRSS();
-    auto start1 = std::chrono::high_resolution_clock::now();
+    size_t memAfter1 = 0;
+    std::chrono::duration<double, std::milli> time1;
     {
+        auto start1 = std::chrono::high_resolution_clock::now();
         std::vector<std::unique_ptr<SmallEntity>> vanillaVec;
         vanillaVec.reserve(count);
         for (size_t i = 0; i < count; ++i) {
@@ -65,10 +67,10 @@ void runScenario1_SmallHighFrequency() {
         }
         volatile uint64_t check = vanillaVec[count / 2]->id;
         (void)check;
+        auto end1 = std::chrono::high_resolution_clock::now();
+        time1 = end1 - start1;
+        memAfter1 = getMeasuredRSS(); // measured while still live, after timing stops, before teardown
     }
-    auto end1 = std::chrono::high_resolution_clock::now();
-    size_t memAfter1 = getMeasuredRSS();
-    std::chrono::duration<double, std::milli> time1 = end1 - start1;
     std::cout << "  [Vanilla unique_ptr] Time: " << time1.count() << " ms | Measured RSS Delta: ~" << (static_cast<int64_t>(memAfter1 - memBefore1) / 1024 / 1024) << " MB\n";
 
     // 1B. ScopeX
@@ -76,8 +78,10 @@ void runScenario1_SmallHighFrequency() {
     // workload so this allocates one chunk up front, same intent as the
     // original "single region" test.
     size_t memBefore2 = getMeasuredRSS();
-    auto start2 = std::chrono::high_resolution_clock::now();
+    size_t memAfter2 = 0;
+    std::chrono::duration<double, std::milli> time2;
     {
+        auto start2 = std::chrono::high_resolution_clock::now();
         Scope scope(count);
         std::vector<Handle<SmallEntity>> handles;
         handles.reserve(count);
@@ -86,10 +90,10 @@ void runScenario1_SmallHighFrequency() {
         }
         volatile uint64_t check = handles[count / 2]->id;
         (void)check;
+        auto end2 = std::chrono::high_resolution_clock::now();
+        time2 = end2 - start2;
+        memAfter2 = getMeasuredRSS(); // measured while still live, after timing stops, before teardown
     }
-    auto end2 = std::chrono::high_resolution_clock::now();
-    size_t memAfter2 = getMeasuredRSS();
-    std::chrono::duration<double, std::milli> time2 = end2 - start2;
     std::cout << "  [ScopeX Region Stack] Time: " << time2.count() << " ms | Measured RSS Delta: ~" << (static_cast<int64_t>(memAfter2 - memBefore2) / 1024 / 1024) << " MB\n";
 }
 
@@ -99,17 +103,19 @@ void runScenario2_LargePayloadThroughput() {
 
     // 2A. Vanilla C++
     size_t memBefore1 = getMeasuredRSS();
-    auto start1 = std::chrono::high_resolution_clock::now();
+    size_t memAfter1 = 0;
+    std::chrono::duration<double, std::milli> time1;
     {
+        auto start1 = std::chrono::high_resolution_clock::now();
         std::vector<std::unique_ptr<LargeEntity>> vanillaVec;
         vanillaVec.reserve(count);
         for (size_t i = 0; i < count; ++i) {
             vanillaVec.push_back(std::make_unique<LargeEntity>());
         }
+        auto end1 = std::chrono::high_resolution_clock::now();
+        time1 = end1 - start1;
+        memAfter1 = getMeasuredRSS(); // measured while still live, after timing stops, before teardown
     }
-    auto end1 = std::chrono::high_resolution_clock::now();
-    size_t memAfter1 = getMeasuredRSS();
-    std::chrono::duration<double, std::milli> time1 = end1 - start1;
     std::cout << "  [Vanilla unique_ptr] Time: " << time1.count() << " ms | Measured RSS Delta: ~" << (static_cast<int64_t>(memAfter1 - memBefore1) / 1024 / 1024) << " MB\n";
 
     // 2B. ScopeX
@@ -117,18 +123,20 @@ void runScenario2_LargePayloadThroughput() {
     // constant, which under elements-per-chunk semantics would try to
     // allocate 134M * 4KB in one shot.
     size_t memBefore2 = getMeasuredRSS();
-    auto start2 = std::chrono::high_resolution_clock::now();
+    size_t memAfter2 = 0;
+    std::chrono::duration<double, std::milli> time2;
     {
+        auto start2 = std::chrono::high_resolution_clock::now();
         Scope scope(count);
         std::vector<Handle<LargeEntity>> handles;
         handles.reserve(count);
         for (size_t i = 0; i < count; ++i) {
             handles.push_back(scope.push<LargeEntity>(LargeEntity{}));
         }
+        auto end2 = std::chrono::high_resolution_clock::now();
+        time2 = end2 - start2;
+        memAfter2 = getMeasuredRSS(); // measured while still live, after timing stops, before teardown
     }
-    auto end2 = std::chrono::high_resolution_clock::now();
-    size_t memAfter2 = getMeasuredRSS();
-    std::chrono::duration<double, std::milli> time2 = end2 - start2;
     std::cout << "  [ScopeX Region Stack] Time: " << time2.count() << " ms | Measured RSS Delta: ~" << (static_cast<int64_t>(memAfter2 - memBefore2) / 1024 / 1024) << " MB\n";
 }
 

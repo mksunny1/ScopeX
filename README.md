@@ -96,14 +96,42 @@ make
 ./scopex_test
 ```
 
+## Benchmarking
+
+`benchmark.cpp` compares ScopeX against `std::vector<std::unique_ptr<T>>`
+across four scenarios: small high-frequency allocation, large payload
+throughput, bulk teardown, and mutable in-place updates. It's a separate,
+optional target — not part of the default build or `run.sh`'s quality
+gate, since it's slow and hardware-dependent rather than something that
+should run on every push.
+
+```
+./benchmark.sh
+```
+
+Or directly via CMake, built in Release mode — an unoptimized build makes
+the `unique_ptr` comparison look artificially slow and skews every result:
+
+```
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make scopex_benchmark
+./scopex_benchmark
+```
+
+Run it locally when changing `TypedPool`, `Chunk`, or allocation logic —
+changes to `Handle` semantics alone don't need a rerun. Results vary with
+whatever else is running on the machine; for a number worth quoting,
+run it a few times and take the median, not the first result.
+
+Full results, methodology, and an honest disclosure of where ScopeX
+currently trades memory density for O(1) access: see
+[`BENCHMARKS.md`](./BENCHMARKS.md).
+
 ## Design notes
 
 - No way to free a single object early short of moving it elsewhere; the
   only bulk-free primitive is `exit()` — deliberate, not a limitation.
 - No thread-safety: concurrent calls into the same `Scope` are a data race.
-- `get()` on a handle whose object has already been moved out throws
-  `ScopeExitedError` rather than silently returning a pointer to destructed
-  memory.
 
 ## License
 MIT
