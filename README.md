@@ -4,6 +4,20 @@ A memory-safe, zero-overhead C++ header-only arena engine: type-safe,
 move-only handles over per-type pools, with bulk scope-exit lifetime
 management.
 
+> **This is not a proposal to replace `unique_ptr`, `shared_ptr`, or
+> ordinary RAII.** ScopeX is one additional primitive, aimed narrowly at
+> a case those tools don't cover well: many heterogeneous objects that
+> share one lifetime and need to be torn down together. If you're
+> managing a single object with its own independent lifetime,
+> `unique_ptr`/`shared_ptr` remain the right tool — nothing here changes
+> that, and you can freely mix both approaches in the same codebase. The
+> benchmark below compares `Scope` against
+> `std::vector<std::unique_ptr<T>>` for that specific batch-lifetime
+> case; it's not a claim that `Scope` is a general substitute for
+> `unique_ptr` itself. The goal here is a primitive solid enough to earn
+> a place next to the ones the standard library already provides — not
+> to unseat them.
+
 ## The idea
 
 C++ has always offered exactly two ways to get memory safety: pay for it at
@@ -132,6 +146,17 @@ currently trades memory density for O(1) access: see
 - No way to free a single object early short of moving it elsewhere; the
   only bulk-free primitive is `exit()` — deliberate, not a limitation.
 - No thread-safety: concurrent calls into the same `Scope` are a data race.
+
+## Related writing
+
+[Separation of Compilation from Attestation in C++](https://gist.github.com/mksunny1/fe88dc882278cb76181e7b2b3eb1d5ce)
+is a separate, exploratory essay by the author on binary-level safety
+attestation as a toolchain concept — cryptographically tagging a binary
+as verified-safe based on the safety invariants it was built against.
+It is **not implemented** in ScopeX: there is no attestation tooling,
+cryptographic tagging, or `.cppsafe` mechanism anywhere in this
+repository. It's linked here as related thinking on the broader problem
+space, not as a description of what this code currently does.
 
 ## License
 MIT
