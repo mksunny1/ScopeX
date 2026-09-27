@@ -1,22 +1,54 @@
 # ScopeX
 
-A memory-safe, low-overhead C++ header-only arena engine: type-safe,
-move-only handles over per-type pools, with bulk scope-exit lifetime
-management.
+A first-class scope for C++: type-safe, move-only handles over per-type
+pools, where misuse throws instead of invoking undefined behavior.
 
-> **This is not a proposal to replace `unique_ptr`, `shared_ptr`, or
-> ordinary RAII.** ScopeX is one additional primitive, aimed narrowly at
-> a case those tools don't cover well: many heterogeneous objects that
-> share one lifetime and need to be torn down together. If you're
-> managing a single object with its own independent lifetime,
-> `unique_ptr`/`shared_ptr` remain the right tool — nothing here changes
-> that, and you can freely mix both approaches in the same codebase. The
-> benchmark below compares `Scope` against
-> `std::vector<std::unique_ptr<T>>` for that specific batch-lifetime
-> case; it's not a claim that `Scope` is a general substitute for
-> `unique_ptr` itself. The goal here is a primitive solid enough to earn
-> a place next to the ones the standard library already provides — not
-> to unseat them.
+## What it is
+
+C++ already gives every block of code a scope: whatever is declared inside
+dies when control leaves it. ScopeX is the movable counterpart — a scope
+you can create, hold, pass around, move objects out of, and end on your own
+terms. Objects pushed into it are constructed in place, destroyed together
+when it ends, and referred to through `Handle<T>` rather than pointers.
+
+The claim: **hold handles, not pointers, and use-after-exit, use-after-move,
+and use of an empty handle stop being undefined behavior — they throw.**
+Careful pointer code can reach the same safety, but it takes discipline,
+mastery, and debugging time. A handle turns that discipline into a property
+of the type.
+
+We recommend it over `unique_ptr` and `shared_ptr` for anything whose
+lifetime is naturally a scope's, including a scope holding a single handle.
+The safety guarantee doesn't depend on how many objects a scope holds: a
+null `unique_ptr` dereferenced is undefined behavior, while an empty or
+exited `Handle` throws. With many objects it is also faster than one heap
+allocation per object (see [`BENCHMARKS.md`](./BENCHMARKS.md)). It doesn't
+replace plain values: if something can just be a local or a member, let it
+be one.
+
+This is a claim about code that uses ScopeX. It does not make C++ as a
+language memory-safe, and nothing stops unrelated code in the same program
+from using raw pointers.
+
+## The rules
+
+The guarantee holds under two rules:
+
+1. **Hold handles, not pointers.** `get()`, `->` and `*` yield a raw
+   pointer for the duration of an expression. Don't store it. A stored
+   pointer outlives the checks the handle performs.
+2. **Keep the `Scope` object alive as long as its handles.** `exit()` is
+   safe: every handle into an exited scope throws. But a `Handle` that
+   outlives the `Scope` *object* itself (destroyed, or replaced by
+   assignment) is currently undefined behavior.
+
+## Scope vs. arena
+
+They are not the same thing. An arena is a memory source: bump-allocate,
+free everything at once, usually raw pointers out and often no destructors
+run. ScopeX is arena-shaped underneath (chunked storage, bulk teardown),
+but the abstraction is a scope: typed objects properly constructed and
+destroyed, handles instead of pointers, and defined failure after `exit()`.
 
 ## The idea
 
@@ -30,7 +62,7 @@ case, a genuinely different way of writing code — lifetimes, borrow
 annotations, an unfamiliar compiler adversary — in the second.
 
 ScopeX is a bet that C++ already has the tools to get most of that safety
-for free, using idioms the language has had since before Rust existed:
+cheaply, using idioms the language has had since before Rust existed:
 RAII and move semantics, aimed at a slightly different target than usual.
 
 - **RAII, generalized.** A C++ scope already destroys what it owns when
@@ -46,8 +78,7 @@ RAII and move semantics, aimed at a slightly different target than usual.
   handle can't be silently reused — by being an ordinary move-only C++
   type: the compiler already refuses to copy it, and after a move its own
   fields are what's left holding (or not holding) a valid location. No new
-  syntax, no annotations, no second compiler pass. Just the move semantics
-  C++ has always had, pointed at the actual problem.
+  syntax, no annotations, no second compiler pass.
 - **Type safety without a runtime check.** `Handle<T>` carries `T` in its
   own type, not as a separate argument supplied again at the call site —
   so calling `get()` with the "wrong" type isn't something the library has
@@ -55,11 +86,7 @@ RAII and move semantics, aimed at a slightly different target than usual.
   first place.
 
 That's the whole thesis: safety as a byproduct of how the types are shaped,
-not as a checker bolted on top or a cost paid on every access. It's why
-this is called a *Scope* and not an *Arena* — an arena is just where memory
-comes from; a scope is a lifetime boundary, the same concept C++ already
-gives every block of code, just handed to you as something you can name,
-hold onto, and control directly.
+not as a checker bolted on top or a cost paid on every access.
 
 ## What it does
 
@@ -75,14 +102,11 @@ hold onto, and control directly.
   cached direct pointer — a single virtual call, no hashmap lookup.
 - `Handle<T>::moveTo(Scope&)` moves the object into another scope and
   rewrites the handle's own fields to point at the new location — the same
-  variable keeps working afterward, now resolving into the new scope. No
-  second handle is returned and no shell is left behind, since `Handle`
-  can't be copied — it was always the only handle to that object.
-- `Scope::exit()` destroys every object every pool the scope ever created
-  still holds, then swaps each pool's implementation for a throwing
-  stand-in. Any further `push()` on that scope, or `get()`/`moveTo()` on
-  any handle still pointing into it, throws `ScopeExitedError` via ordinary
-  virtual dispatch.
+  variable keeps working afterward, now resolving into the new scope.
+- `Scope::exit()` destroys every object the scope's pools still hold, then
+  swaps each pool's implementation for a throwing stand-in. Any further
+  `push()` on that scope, or `get()`/`moveTo()` on any handle still pointing
+  into it, throws `ScopeExitedError` via ordinary virtual dispatch.
 - `Scope` has exactly two responsibilities: `push()` and `exit()`. Moving
   an object between scopes is initiated from the handle, not from `Scope`.
 
@@ -93,12 +117,14 @@ hold onto, and control directly.
 
 Scope scope;
 Handle<MyType> h = scope.push<MyType>(args...);
-MyType* obj = h.get();       // or h->member, or *h
+MyType* obj = h.get();       // or h->member, or *h  (don't store obj)
 
 Scope other;
 h.moveTo(other);   // h now points into other; same variable, still usable
 
-scope.exit(); // destroys everything scope still owns; scope object itself remains valid, reusable memory
+scope.exit();      // destroys everything scope still owns; scope.push() and
+                   // any handle into it now throw. The Scope object remains
+                   // valid memory: assign a fresh Scope to reuse the slot.
 ```
 
 ## Building
@@ -141,22 +167,29 @@ Full results, methodology, and an honest disclosure of where ScopeX
 currently trades memory density for O(1) access: see
 [`BENCHMARKS.md`](./BENCHMARKS.md).
 
-## Design notes
+## Design notes and limits
 
 - No way to free a single object early short of moving it elsewhere; the
   only bulk-free primitive is `exit()` — deliberate, not a limitation.
+- One concrete type per handle: `Handle<T>` holds exactly a `T`. There is
+  no `Handle<Base>` referring to a `Derived`; use `unique_ptr` for
+  polymorphic ownership.
+- A `Scope` has fixed setup cost (a chunk of `chunkCapacity` slots per
+  type, 1024 by default). For a scope that will hold only a few objects,
+  pass a small capacity.
+- Destruction order within one type's pool is allocation order; across
+  different types it is unspecified.
 - No thread-safety: concurrent calls into the same `Scope` are a data race.
 
 ## Related writing
 
 [Separation of Compilation from Attestation in C++](https://gist.github.com/mksunny1/fe88dc882278cb76181e7b2b3eb1d5ce)
-is a separate, exploratory essay by the author on binary-level safety
-attestation as a toolchain concept — cryptographically tagging a binary
-as verified-safe based on the safety invariants it was built against.
-It is **not implemented** in ScopeX: there is no attestation tooling,
-cryptographic tagging, or `.cppsafe` mechanism anywhere in this
-repository. It's linked here as related thinking on the broader problem
-space, not as a description of what this code currently does.
+is a separate essay on binary-level safety attestation: a toolchain
+proposal for making safety rules machine-checkable. It is **not
+implemented** in this repository — there is no attestation tooling,
+cryptographic tagging, or `.cppsafe` mechanism here. It's linked as
+related thinking on the broader problem, not as a description of what this
+code does.
 
 ## License
 MIT
