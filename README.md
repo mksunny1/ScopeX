@@ -1,6 +1,6 @@
 # ScopeX
 
-A memory-safe, zero-overhead C++ header-only arena engine: type-safe,
+A memory-safe, low-overhead C++ header-only arena engine: type-safe,
 move-only handles over per-type pools, with bulk scope-exit lifetime
 management.
 
